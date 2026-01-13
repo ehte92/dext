@@ -17,8 +17,8 @@ struct PokemonRowView: View {
                 Spacer()
                 Circle()
                     .fill(Color.white.opacity(0.2))
-                    .frame(width: 100, height: 100)
-                    .offset(x: 10) // Push slightly off edge
+                    .frame(width: 140, height: 140)
+                    .offset(x: 30, y: 10) // Push slightly off edge to bottom right
             }
             .clipShape(RoundedRectangle(cornerRadius: 16)) // Clip to card bounds
             
@@ -70,16 +70,16 @@ struct PokemonRowView: View {
                     switch phase {
                     case .empty:
                         ProgressView()
-                            .frame(width: 60, height: 60)
+                            .frame(width: 50, height: 50)
                     case .success(let image):
                         image
                             .resizable()
                             .scaledToFit()
-                            .frame(width: 76, height: 76)
+                            .frame(width: 68, height: 68)
                             .shadow(radius: 4)
                     case .failure:
                         Image(systemName: "questionmark.circle")
-                            .frame(width: 60, height: 60)
+                            .frame(width: 50, height: 50)
                             .foregroundColor(.white.opacity(0.5))
                     @unknown default:
                          EmptyView()
@@ -88,9 +88,11 @@ struct PokemonRowView: View {
                 .padding(.trailing, 10)
                 .offset(y: 4)
             }
-            .padding(.vertical, 12)
+            // Removing vertical padding here to let the frame control height tightly
         }
-        // No fixed height, let content drive spacing
+        .frame(height: 76) // Enforce compact height
+        .contentShape(Rectangle())
+        .clipped() // CRITICAL: Prevent 140pt circle from bleeding out
     }
 }
 
