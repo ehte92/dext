@@ -18,7 +18,7 @@ struct PokemonRowView: View {
                 Circle()
                     .fill(Color.white.opacity(0.2))
                     .frame(width: 140, height: 140)
-                    .offset(x: 30, y: 10) // Push slightly off edge to bottom right
+                    .offset(x: 30) // Only horizontal push
             }
             .clipShape(RoundedRectangle(cornerRadius: 16)) // Clip to card bounds
             
@@ -86,7 +86,6 @@ struct PokemonRowView: View {
                     }
                 }
                 .padding(.trailing, 10)
-                .offset(y: 4)
             }
             // Removing vertical padding here to let the frame control height tightly
         }
