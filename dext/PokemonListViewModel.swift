@@ -19,10 +19,41 @@ class PokemonListViewModel: ObservableObject {
         errorMessage = nil
         
         do {
-            let newPokemon = try await service.fetchPokemon(limit: limit, offset: offset)
+            var newPokemon = try await service.fetchPokemon(limit: limit, offset: offset)
+            
             if newPokemon.isEmpty {
                 canLoadMore = false
             } else {
+                // Fetch details in parallel
+                newPokemon = await withTaskGroup(of: Pokemon.self) { group in
+                    for var pokemon in newPokemon {
+                        group.addTask {
+                            do {
+                                // Concurrent fetch of independent details
+                                async let types = self.service.fetchPokemonDetails(id: pokemon.id)
+                                async let color = self.service.fetchPokemonSpecies(id: pokemon.id)
+                                
+                                pokemon.types = try await types
+                                pokemon.mainColor = try await color
+                                return pokemon
+                            } catch {
+                                print("Failed to fetch details for \(pokemon.name): \(error)")
+                                return pokemon
+                            }
+                        }
+                    }
+                    
+                    var results: [Pokemon] = []
+                    for await pokemon in group {
+                        results.append(pokemon)
+                    }
+                    
+                    // Restore original order
+                    return newPokemon.map { original in
+                        results.first(where: { $0.id == original.id }) ?? original
+                    }
+                }
+                
                 pokemonList.append(contentsOf: newPokemon)
                 offset += limit
             }

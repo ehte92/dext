@@ -5,23 +5,27 @@ struct ContentView: View {
     
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(viewModel.pokemonList) { pokemon in
-                    PokemonRowView(pokemon: pokemon)
-                        .onAppear {
-                            if viewModel.hasReachedEnd(of: pokemon) {
-                                viewModel.loadMore()
+            ScrollView {
+                LazyVStack(spacing: 20) {
+                    ForEach(viewModel.pokemonList) { pokemon in
+                        PokemonRowView(pokemon: pokemon)
+                            .onAppear {
+                                if viewModel.hasReachedEnd(of: pokemon) {
+                                    viewModel.loadMore()
+                                }
                             }
+                    }
+                    
+                    if viewModel.isLoading {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
                         }
-                }
-                
-                if viewModel.isLoading {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                        Spacer()
+                        .padding()
                     }
                 }
+                .padding()
             }
             .navigationTitle("Pokédex")
             .onAppear {
