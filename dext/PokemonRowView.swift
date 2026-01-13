@@ -91,8 +91,7 @@ struct PokemonRowView: View {
             // Removing vertical padding here to let the frame control height tightly
         }
         .frame(height: 76) // Enforce compact height
-        .contentShape(Rectangle())
-        .clipped() // CRITICAL: Prevent 140pt circle from bleeding out
+        .clipShape(RoundedRectangle(cornerRadius: 16)) // Clip overflow while keeping rounded corners
     }
 }
 
