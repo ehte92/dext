@@ -38,6 +38,15 @@ extension Color {
         default: return Color(red: 0.5, green: 0.5, blue: 0.5)
         }
     }
+    
+    static func textContrastColor(for name: String) -> Color {
+        switch name.lowercased() {
+        case "white", "normal": return Color(red: 0.2, green: 0.2, blue: 0.25) // Dark Charcoal
+        case "yellow", "electric": return Color(red: 0.4, green: 0.3, blue: 0.1) // Dark Brown
+        case "pink", "fairy": return Color(red: 0.5, green: 0.2, blue: 0.3) // Dark Maroon
+        default: return .white
+        }
+    }
 }
 
 struct Pokemon: Identifiable, Codable, Equatable {

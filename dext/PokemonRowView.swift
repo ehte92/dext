@@ -5,6 +5,7 @@ struct PokemonRowView: View {
     
     var body: some View {
         let backgroundColor = Color.from(name: pokemon.mainColor ?? pokemon.types?.first ?? "normal")
+        let textColor = Color.textContrastColor(for: pokemon.mainColor ?? pokemon.types?.first ?? "normal")
         
         ZStack {
             // Background
@@ -29,12 +30,12 @@ struct PokemonRowView: View {
                         Text(pokemon.formattedId)
                             .font(.headline)
                             .fontWeight(.bold)
-                            .foregroundStyle(.black.opacity(0.2))
+                            .foregroundStyle(textColor.opacity(0.6))
                         
                         Text(pokemon.capitalizedName)
                             .font(.title3)
                             .fontWeight(.heavy)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(textColor)
                             .lineLimit(1)
                     }
                     
@@ -44,13 +45,13 @@ struct PokemonRowView: View {
                             ForEach(types, id: \.self) { type in
                                 Text(type.uppercased())
                                     .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(textColor)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 4)
                                     .background(
                                         Capsule()
-                                            .fill(Color.white.opacity(0.2))
-                                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                                            .fill(textColor.opacity(0.2))
+                                            .stroke(textColor.opacity(0.3), lineWidth: 1)
                                     )
                             }
                         }
@@ -58,7 +59,7 @@ struct PokemonRowView: View {
                         // Skeleton placeholder for types if loading
                          Text("LOADING...")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(textColor.opacity(0.5))
                     }
                 }
                 .padding(.leading, 20)
