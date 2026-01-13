@@ -1,21 +1,40 @@
-//
-//  ContentView.swift
-//  dext
-//
-//  Created by Ehtesham Ansari on 1/13/26.
-//
-
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var viewModel = PokemonListViewModel()
+    
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        NavigationStack {
+            List {
+                ForEach(viewModel.pokemonList) { pokemon in
+                    PokemonRowView(pokemon: pokemon)
+                        .onAppear {
+                            if viewModel.hasReachedEnd(of: pokemon) {
+                                viewModel.loadMore()
+                            }
+                        }
+                }
+                
+                if viewModel.isLoading {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                }
+            }
+            .navigationTitle("Pokédex")
+            .onAppear {
+                if viewModel.pokemonList.isEmpty {
+                    viewModel.loadMore()
+                }
+            }
+            .alert("Error", isPresented: Binding(get: { viewModel.errorMessage != nil }, set: { _ in viewModel.errorMessage = nil })) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(viewModel.errorMessage ?? "Unknown error")
+            }
         }
-        .padding()
     }
 }
 
