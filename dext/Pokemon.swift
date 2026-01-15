@@ -126,6 +126,7 @@ struct TypeInfo: Codable {
 }
 
 struct PokemonSpeciesResponse: Codable {
+    let id: Int
     let color: SpeciesColor
     let varieties: [PokemonSpeciesVariety]
 }

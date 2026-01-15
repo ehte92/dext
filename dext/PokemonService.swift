@@ -71,4 +71,21 @@ class PokemonService {
         let listResponse = try decoder.decode(PokemonListResponse.self, from: data)
         return listResponse.results
     }
+    
+    func fetchAllPokemonRefs() async throws -> [Pokemon] {
+        guard let url = URL(string: "https://pokeapi.co/api/v2/pokemon?limit=2000") else {
+            throw URLError(.badURL)
+        }
+        
+        let (data, response) = try await URLSession.shared.data(from: url)
+         
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        
+        let decoder = JSONDecoder()
+        let listResponse = try decoder.decode(PokemonListResponse.self, from: data)
+        return listResponse.results
+    }
 }

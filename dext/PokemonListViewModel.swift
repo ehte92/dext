@@ -6,6 +6,11 @@ class PokemonListViewModel: ObservableObject {
     @Published var pokemonList: [Pokemon] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published var searchText: String = "" {
+        didSet {
+            performSearch()
+        }
+    }
     
     private let service = PokemonService()
     private let cacheService = CacheService()
@@ -13,8 +18,130 @@ class PokemonListViewModel: ObservableObject {
     private let limit = 20
     private var canLoadMore = true
     
+    // Global Index for Search
+    private var allPokemonRefs: [Pokemon] = []
+    @Published var searchResults: [Pokemon] = []
+    
+    var filteredPokemon: [Pokemon] {
+        if searchText.isEmpty {
+            return pokemonList
+        } else {
+            return searchResults
+        }
+    }
+    
     init() {
         loadCache()
+        loadGlobalIndex()
+    }
+    
+    private func loadGlobalIndex() {
+        Task {
+            do {
+                allPokemonRefs = try await service.fetchAllPokemonRefs()
+            } catch {
+                print("Failed to load global index: \(error)")
+            }
+        }
+    }
+    
+    private func performSearch() {
+        guard !searchText.isEmpty else {
+            searchResults = []
+            return
+        }
+        
+        // 1. Filter local refs
+        let query = searchText.lowercased()
+        let matches = allPokemonRefs.filter { pokemon in
+            pokemon.name.localizedCaseInsensitiveContains(query) ||
+            "\(pokemon.id)".contains(query)
+        }
+        
+        // 2. Set results immediately (skeletons)
+        // Limit to reasonable number to prevent UI lag on massive results
+        self.searchResults = Array(matches.prefix(50))
+        
+        // 3. Fetch Details for top results
+        fetchDetailsForSearch(results: self.searchResults)
+    }
+     
+    private func fetchDetailsForSearch(results: [Pokemon]) {
+        Task {
+            // Fetch for top 20 visible
+            let topResults = results.prefix(20)
+             
+            await withTaskGroup(of: Pokemon.self) { group in
+                for var pokemon in topResults {
+                    // Check if we already have it in main list (optimization)
+                    // Performed on MainActor BEFORE entering the background task
+                    let existing = self.pokemonList.first(where: { $0.id == pokemon.id })
+                    
+                    group.addTask { [existing, pokemon] in
+                         if let existing = existing {
+                             return existing
+                         }
+                         
+                         var pokemon = pokemon
+                         
+                        do {
+                            // It's a raw Pokemon ref, so `pokemon.speciesId` is nil.
+                            // We need to fetch details to get Types and Color.
+                            // Note: `fetchPokemonDetails` returns [Type]. `fetchPokemonSpecies` returns Color.
+                            // But for Global Search results (which are /pokemon items), we want to show them like normal cards.
+                            
+                            // 1. Fetch Types
+                            async let types = self.service.fetchPokemonDetails(id: pokemon.id)
+                            
+                            // 2. Fetch Species (to get Color AND Species ID if possible)
+                            // Note: We don't know the species ID yet. But usually it matches or we can look it up.
+                            // For /pokemon/10033 (Mega), the species is /pokemon-species/3.
+                            // We can fetch the Pokemon object /pokemon/{id} to get the species url, but simpler is:
+                            // Just fetch species info. However, `fetchPokemonSpecies(id:)` takes an ID.
+                            // If we pass 10033 to `pokemon-species/`, it 404s.
+                            // So we need to handle that.
+                            
+                            // Simplified approach for search: Just get Types -> "Unknown" color if fail.
+                            // Or default color based on Type.
+                            // Let's try to fetch types first.
+                            pokemon.types = try await types
+                            
+                            // Approximate color from Type?
+                            // Or try to fetch species if ID <= 1025.
+                            // If ID > 10000, it's a variant.
+                            
+                            // Let's rely on Type Color fallback if Species fetch fails.
+                            if pokemon.id <= 1025 {
+                                let species = try await self.service.fetchPokemonSpecies(id: pokemon.id)
+                                pokemon.mainColor = species.color.name
+                                pokemon.speciesId = species.id
+                            } else {
+                                // For variants, color lookup is harder without fetching the full Pokemon object.
+                                // Fallback to Type color is fine.
+                            }
+                            
+                            return pokemon
+                        } catch {
+                            // If failed, return as is (will show Loading/Skeleton)
+                            return pokemon
+                        }
+                    }
+                }
+                
+                var detailedResults: [Pokemon] = []
+                for await p in group {
+                    detailedResults.append(p)
+                }
+                
+                // Update Search Results with details
+                DispatchQueue.main.async {
+                    // Update the structs in the array
+                     self.searchResults = self.searchResults.map { original in
+                         detailedResults.first(where: { $0.id == original.id }) ?? original
+                     }
+                }
+            }
+        }
     }
     
     private func loadCache() {

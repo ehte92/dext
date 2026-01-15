@@ -7,27 +7,25 @@ struct ContentView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 20) {
-                    ForEach(viewModel.pokemonList) { pokemon in
+                    ForEach(viewModel.filteredPokemon) { pokemon in
                         PokemonRowView(pokemon: pokemon)
                             .onAppear {
-                                if viewModel.hasReachedEnd(of: pokemon) {
+                                if viewModel.searchText.isEmpty && viewModel.hasReachedEnd(of: pokemon) {
                                     viewModel.loadMore()
                                 }
                             }
                     }
                     
                     if viewModel.isLoading {
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                            Spacer()
-                        }
-                        .padding()
+                        ProgressView()
+                            .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
-                .padding()
+                .padding(.vertical, 20)
             }
             .navigationTitle("Pokédex")
+            .background(Color(UIColor.systemGroupedBackground))
+            .searchable(text: $viewModel.searchText, prompt: "Search Pokemon")
             .onAppear {
                 if viewModel.pokemonList.isEmpty {
                     viewModel.loadMore()
