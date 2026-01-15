@@ -28,15 +28,15 @@ struct PokemonRowView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .center, spacing: 8) {
                         Text(pokemon.formattedId)
-                            .font(.headline)
-                            .fontWeight(.bold)
+                            .font(.system(size: 16, weight: .bold, design: .monospaced))
                             .foregroundStyle(textColor.opacity(0.6))
                         
                         Text(pokemon.capitalizedName)
-                            .font(.title3)
-                            .fontWeight(.heavy)
+                            .font(.system(size: 18, weight: .bold, design: .monospaced)) // Thinner and smaller
                             .foregroundStyle(textColor)
-                            .lineLimit(1)
+                            .lineLimit(2) // Allow wrapping
+                            .minimumScaleFactor(0.8) // Mild scaling before truncation
+                            .padding(.trailing, 8) // Ensure it doesn't touch the image area tightly
                     }
                     
                     // Type Badges (Pills)
@@ -44,7 +44,7 @@ struct PokemonRowView: View {
                         HStack {
                             ForEach(types, id: \.self) { type in
                                 Text(type.uppercased())
-                                    .font(.system(size: 10, weight: .bold))
+                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
                                     .foregroundStyle(textColor)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 4)
@@ -58,7 +58,7 @@ struct PokemonRowView: View {
                     } else {
                         // Skeleton placeholder for types if loading
                          Text("LOADING...")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
                             .foregroundStyle(textColor.opacity(0.5))
                     }
                 }
