@@ -8,9 +8,24 @@ class PokemonListViewModel: ObservableObject {
     @Published var errorMessage: String?
     
     private let service = PokemonService()
+    private let cacheService = CacheService()
     private var offset = 0
     private let limit = 20
     private var canLoadMore = true
+    
+    init() {
+        loadCache()
+    }
+    
+    private func loadCache() {
+        if let cachedPokemon = cacheService.load() {
+            self.pokemonList = cachedPokemon
+            self.offset = cachedPokemon.count
+            // If we have cached data, we might be at the end, or we can load more.
+            // Usually safest to assume we can load more if we have data.
+            // But if cached count is 0, offset is 0.
+        }
+    }
     
     func loadMoreInternal() async {
         guard !isLoading && canLoadMore else { return }
@@ -51,11 +66,7 @@ class PokemonListViewModel: ObservableObject {
                                     variants.append(p)
                                 }
                                 
-                                // Sort variants: Default first, then by ID or name?
-                                // Usually we want standard first. `is_default` helps.
-                                // But `PokemonSpeciesVariety` struct had `is_default`.
-                                // Let's just assume the API order or sort standard first.
-                                // API usually puts default first.
+                                // Sort variants
                                 return variants
                             } catch {
                                 print("Failed to fetch species details for \(species.name): \(error)")
@@ -70,15 +81,9 @@ class PokemonListViewModel: ObservableObject {
                     }
                     
                     // Restore Species Order (Crucial for list consistency)
-                    // We want: Species 1 (All Variants), Species 2 (All Variants)...
                     var orderedResults: [Pokemon] = []
                     for species in speciesList {
-                        // Find all pokemon belonging to this species ID
                         let belongingToSpecies = results.filter { $0.speciesId == species.id }
-                        
-                        // Sort them: Default first? We lost `is_default` unless we store it.
-                        // However, usually the default form has the same ID as the species (for Gen 1-7).
-                        // Let's sort by ID, usually base form has lower ID than Mega (10000+).
                         let sorted = belongingToSpecies.sorted { $0.id < $1.id }
                         orderedResults.append(contentsOf: sorted)
                     }
@@ -88,6 +93,9 @@ class PokemonListViewModel: ObservableObject {
                 
                 pokemonList.append(contentsOf: newPokemon)
                 offset += limit
+                
+                // Save to Cache
+                cacheService.save(pokemon: pokemonList)
             }
         } catch {
             errorMessage = "Failed to load Pokemon: \(error.localizedDescription)"
