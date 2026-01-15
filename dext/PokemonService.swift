@@ -39,7 +39,7 @@ class PokemonService {
         return detailResponse.types.map { $0.type.name }
     }
     
-    func fetchPokemonSpecies(id: Int) async throws -> String {
+    func fetchPokemonSpecies(id: Int) async throws -> PokemonSpeciesResponse {
         guard let url = URL(string: "https://pokeapi.co/api/v2/pokemon-species/\(id)/") else {
             throw URLError(.badURL)
         }
@@ -52,8 +52,23 @@ class PokemonService {
         }
         
         let decoder = JSONDecoder()
-        let speciesResponse = try decoder.decode(PokemonSpeciesResponse.self, from: data)
+        return try decoder.decode(PokemonSpeciesResponse.self, from: data)
+    }
+    
+    func fetchSpeciesList(limit: Int, offset: Int) async throws -> [Pokemon] {
+        guard let url = URL(string: "https://pokeapi.co/api/v2/pokemon-species?limit=\(limit)&offset=\(offset)") else {
+            throw URLError(.badURL)
+        }
         
-        return speciesResponse.color.name
+        let (data, response) = try await URLSession.shared.data(from: url)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        
+        let decoder = JSONDecoder()
+        let listResponse = try decoder.decode(PokemonListResponse.self, from: data)
+        return listResponse.results
     }
 }

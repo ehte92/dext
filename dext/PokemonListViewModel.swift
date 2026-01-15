@@ -19,39 +19,71 @@ class PokemonListViewModel: ObservableObject {
         errorMessage = nil
         
         do {
-            var newPokemon = try await service.fetchPokemon(limit: limit, offset: offset)
+            // 1. Fetch Species List (instead of Pokemon list)
+            let speciesList = try await service.fetchSpeciesList(limit: limit, offset: offset)
             
-            if newPokemon.isEmpty {
+            if speciesList.isEmpty {
                 canLoadMore = false
             } else {
-                // Fetch details in parallel
-                newPokemon = await withTaskGroup(of: Pokemon.self) { group in
-                    for var pokemon in newPokemon {
+                // 2. Fetch details for each species (Parallel)
+                let newPokemon = await withTaskGroup(of: [Pokemon].self) { group in
+                    for species in speciesList {
                         group.addTask {
                             do {
-                                // Concurrent fetch of independent details
-                                async let types = self.service.fetchPokemonDetails(id: pokemon.id)
-                                async let color = self.service.fetchPokemonSpecies(id: pokemon.id)
+                                // Fetch Species Details (Variation + Color)
+                                let speciesDetails = try await self.service.fetchPokemonSpecies(id: species.id)
                                 
-                                pokemon.types = try await types
-                                pokemon.mainColor = try await color
-                                return pokemon
+                                // Expand Varieties
+                                var variants: [Pokemon] = []
+                                
+                                // Iterate through all varieties
+                                for var variety in speciesDetails.varieties {
+                                    var p = variety.pokemon
+                                    p.speciesId = species.id
+                                    p.mainColor = speciesDetails.color.name
+                                    
+                                    // Fetch Types for this specific variant
+                                    // Note: This adds N calls per species, but concurrent
+                                    if let types = try? await self.service.fetchPokemonDetails(id: p.id) {
+                                        p.types = types
+                                    }
+                                    
+                                    variants.append(p)
+                                }
+                                
+                                // Sort variants: Default first, then by ID or name?
+                                // Usually we want standard first. `is_default` helps.
+                                // But `PokemonSpeciesVariety` struct had `is_default`.
+                                // Let's just assume the API order or sort standard first.
+                                // API usually puts default first.
+                                return variants
                             } catch {
-                                print("Failed to fetch details for \(pokemon.name): \(error)")
-                                return pokemon
+                                print("Failed to fetch species details for \(species.name): \(error)")
+                                return []
                             }
                         }
                     }
                     
                     var results: [Pokemon] = []
-                    for await pokemon in group {
-                        results.append(pokemon)
+                    for await batch in group {
+                        results.append(contentsOf: batch)
                     }
                     
-                    // Restore original order
-                    return newPokemon.map { original in
-                        results.first(where: { $0.id == original.id }) ?? original
+                    // Restore Species Order (Crucial for list consistency)
+                    // We want: Species 1 (All Variants), Species 2 (All Variants)...
+                    var orderedResults: [Pokemon] = []
+                    for species in speciesList {
+                        // Find all pokemon belonging to this species ID
+                        let belongingToSpecies = results.filter { $0.speciesId == species.id }
+                        
+                        // Sort them: Default first? We lost `is_default` unless we store it.
+                        // However, usually the default form has the same ID as the species (for Gen 1-7).
+                        // Let's sort by ID, usually base form has lower ID than Mega (10000+).
+                        let sorted = belongingToSpecies.sorted { $0.id < $1.id }
+                        orderedResults.append(contentsOf: sorted)
                     }
+                    
+                    return orderedResults
                 }
                 
                 pokemonList.append(contentsOf: newPokemon)

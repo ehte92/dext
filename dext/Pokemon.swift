@@ -53,6 +53,8 @@ struct Pokemon: Identifiable, Codable, Equatable {
     let name: String
     let url: String
     
+    var speciesId: Int?
+    
     var id: Int {
         // Extract ID from URL (e.g., https://pokeapi.co/api/v2/pokemon/1/)
         guard let urlComponent = URL(string: url),
@@ -69,10 +71,34 @@ struct Pokemon: Identifiable, Codable, Equatable {
     
     // Formatting the name to be capitalized
     var capitalizedName: String {
-        return name.capitalized
+        // Handle Variants like "venusaur-mega" -> "Mega Venusaur"
+        if name.hasSuffix("-mega") {
+            return "Mega \(name.dropLast(5).capitalized)"
+        }
+        if name.hasSuffix("-gmax") {
+            return "Gigantamax \(name.dropLast(5).capitalized)"
+        }
+        if name.hasSuffix("-alola") {
+            return "Alolan \(name.dropLast(6).capitalized)"
+        }
+        if name.hasSuffix("-galar") {
+            return "Galarian \(name.dropLast(6).capitalized)"
+        }
+        if name.hasSuffix("-hisui") {
+            return "Hisuian \(name.dropLast(6).capitalized)"
+        }
+        if name.hasSuffix("-paldea") {
+            return "Paldean \(name.dropLast(7).capitalized)"
+        }
+        
+        // Handle "alola", "galar", "hisui" suffix patterns if needed, or simple replacement
+        return name.capitalized.replacingOccurrences(of: "-", with: " ")
     }
     
     var formattedId: String {
+        if let speciesId = speciesId {
+            return String(format: "#%03d", speciesId)
+        }
         return String(format: "#%03d", id)
     }
     
@@ -101,8 +127,14 @@ struct TypeInfo: Codable {
 
 struct PokemonSpeciesResponse: Codable {
     let color: SpeciesColor
+    let varieties: [PokemonSpeciesVariety]
 }
 
 struct SpeciesColor: Codable {
     let name: String
+}
+
+struct PokemonSpeciesVariety: Codable {
+    let is_default: Bool
+    let pokemon: Pokemon
 }
