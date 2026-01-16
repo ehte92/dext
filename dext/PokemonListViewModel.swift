@@ -1,6 +1,28 @@
 import Foundation
 import Combine
 
+struct FilterConfig {
+    enum SortOption: String, CaseIterable, Identifiable {
+        case id = "Number"
+        case name = "Name"
+        var id: String { rawValue }
+    }
+    
+    enum SortOrder: String, CaseIterable, Identifiable {
+        case ascending = "Ascending"
+        case descending = "Descending"
+        var id: String { rawValue }
+    }
+    
+    var sortOption: SortOption = .id
+    var sortOrder: SortOrder = .ascending
+    var typeFilters: Set<String> = [] // Changed to Set for multi-select
+    
+    var isDefault: Bool {
+        sortOption == .id && sortOrder == .ascending && typeFilters.isEmpty
+    }
+}
+
 @MainActor
 class PokemonListViewModel: ObservableObject {
     @Published var pokemonList: [Pokemon] = []
@@ -12,14 +34,18 @@ class PokemonListViewModel: ObservableObject {
         }
     }
     
+    @Published var filterConfig = FilterConfig()
+    @Published var isFilterPresented = false
+    
     private let service = PokemonService()
     private let cacheService = CacheService()
     private var offset = 0
     private let limit = 20
     private var canLoadMore = true
     
-    // Global Index for Search
+    // Global Index for Search/Flat Sorting
     private var allPokemonRefs: [Pokemon] = []
+    private var sortedFlatRefs: [Pokemon] = [] // The full sorted list we paginate through
     @Published var searchResults: [Pokemon] = []
     
     var filteredPokemon: [Pokemon] {
@@ -31,6 +57,7 @@ class PokemonListViewModel: ObservableObject {
     }
     
     init() {
+        // Initial load relies on defaults (Species paging)
         loadCache()
         loadGlobalIndex()
     }
@@ -51,94 +78,191 @@ class PokemonListViewModel: ObservableObject {
             return
         }
         
-        // 1. Filter local refs
         let query = searchText.lowercased()
         let matches = allPokemonRefs.filter { pokemon in
             pokemon.name.localizedCaseInsensitiveContains(query) ||
             "\(pokemon.id)".contains(query)
         }
         
-        // 2. Set results immediately (skeletons)
-        // Limit to reasonable number to prevent UI lag on massive results
         self.searchResults = Array(matches.prefix(50))
-        
-        // 3. Fetch Details for top results
-        fetchDetailsForSearch(results: self.searchResults)
+        fetchDetailsForList(refs: self.searchResults, isSearch: true)
     }
-     
-    private func fetchDetailsForSearch(results: [Pokemon]) {
+    
+    // MARK: - Sorting & Filtering Application
+    
+    func applyFilters() {
+        isLoading = true
+        pokemonList = []
+        offset = 0
+        canLoadMore = true
+        errorMessage = nil
+        
         Task {
-            // Fetch for top 20 visible
-            let topResults = results.prefix(20)
-             
-            await withTaskGroup(of: Pokemon.self) { group in
-                for var pokemon in topResults {
-                    // Check if we already have it in main list (optimization)
-                    // Performed on MainActor BEFORE entering the background task
-                    let existing = self.pokemonList.first(where: { $0.id == pokemon.id })
+            do {
+                if filterConfig.isDefault {
+                    // Revert to Default "Species" Paging
+                    isLoading = false // Reset before loading
+                    await loadMoreInternal()
+                } else {
+                    // Flat Mode
                     
-                    group.addTask { [existing, pokemon] in
-                         if let existing = existing {
-                             return existing
-                         }
-                         
-                         var pokemon = pokemon
-                         
-                        do {
-                            // It's a raw Pokemon ref, so `pokemon.speciesId` is nil.
-                            // We need to fetch details to get Types and Color.
-                            // Note: `fetchPokemonDetails` returns [Type]. `fetchPokemonSpecies` returns Color.
-                            // But for Global Search results (which are /pokemon items), we want to show them like normal cards.
-                            
-                            // 1. Fetch Types
-                            async let types = self.service.fetchPokemonDetails(id: pokemon.id)
-                            
-                            // 2. Fetch Species (to get Color AND Species ID if possible)
-                            // Note: We don't know the species ID yet. But usually it matches or we can look it up.
-                            // For /pokemon/10033 (Mega), the species is /pokemon-species/3.
-                            // We can fetch the Pokemon object /pokemon/{id} to get the species url, but simpler is:
-                            // Just fetch species info. However, `fetchPokemonSpecies(id:)` takes an ID.
-                            // If we pass 10033 to `pokemon-species/`, it 404s.
-                            // So we need to handle that.
-                            
-                            // Simplified approach for search: Just get Types -> "Unknown" color if fail.
-                            // Or default color based on Type.
-                            // Let's try to fetch types first.
-                            pokemon.types = try await types
-                            
-                            // Approximate color from Type?
-                            // Or try to fetch species if ID <= 1025.
-                            // If ID > 10000, it's a variant.
-                            
-                            // Let's rely on Type Color fallback if Species fetch fails.
-                            if pokemon.id <= 1025 {
-                                let species = try await self.service.fetchPokemonSpecies(id: pokemon.id)
-                                pokemon.mainColor = species.color.name
-                                pokemon.speciesId = species.id
-                            } else {
-                                // For variants, color lookup is harder without fetching the full Pokemon object.
-                                // Fallback to Type color is fine.
+                    // 1. Get Base List (All or Type Union)
+                    var baseList: [Pokemon] = []
+                    
+                    if filterConfig.typeFilters.isEmpty {
+                        // Ensure global index is ready, or fetch it
+                        if allPokemonRefs.isEmpty {
+                            allPokemonRefs = try await service.fetchAllPokemonRefs()
+                        }
+                        baseList = allPokemonRefs
+                    } else {
+                        // Multi-Type Filter (OR Logic)
+                        // Fetch all selected types in parallel
+                        let types = Array(filterConfig.typeFilters)
+                        
+                        // Use TaskGroup to fetch each type list
+                        baseList = await withTaskGroup(of: [Pokemon].self) { group in
+                            for type in types {
+                                group.addTask {
+                                    do {
+                                        return try await self.service.fetchPokemonByType(type: type)
+                                    } catch {
+                                        print("Error fetching type \(type): \(error)")
+                                        return []
+                                    }
+                                }
                             }
                             
-                            return pokemon
+                            var combined: Set<Int> = [] // Track IDs to avoid duplicates if Pokemon has 2 selected types
+                            var uniqueList: [Pokemon] = []
+                            
+                            for await list in group {
+                                for p in list {
+                                    if !combined.contains(p.id) {
+                                        combined.insert(p.id)
+                                        uniqueList.append(p)
+                                    }
+                                }
+                            }
+                            return uniqueList
+                        }
+                    }
+                    
+                    // 2. Sort
+                    switch filterConfig.sortOption {
+                    case .id:
+                        baseList.sort { $0.id < $1.id }
+                    case .name:
+                        baseList.sort { $0.name < $1.name }
+                    }
+                    
+                    if filterConfig.sortOrder == .descending {
+                        baseList.reverse()
+                    }
+                    
+                    self.sortedFlatRefs = baseList
+                    
+                    // 3. Load first page
+                    // Important: Reset loading state so loadMoreFlat can start cleanly
+                    isLoading = false 
+                    await loadMoreFlat()
+                }
+            } catch {
+                errorMessage = "Failed to apply filters: \(error.localizedDescription)"
+                isLoading = false
+            }
+        }
+    }
+    
+    // MARK: - Paging Logic
+    
+    func loadMore() {
+        Task {
+            if filterConfig.isDefault {
+                await loadMoreInternal()
+            } else {
+                await loadMoreFlat()
+            }
+        }
+    }
+    
+    private func loadMoreFlat() async {
+        guard !isLoading && canLoadMore else { return }
+        
+        isLoading = true
+        
+        let end = min(offset + limit, sortedFlatRefs.count)
+        guard offset < end else {
+            canLoadMore = false
+            isLoading = false
+            return
+        }
+        
+        let pageRefs = Array(sortedFlatRefs[offset..<end])
+        
+        // Add skeletons immediately
+        self.pokemonList.append(contentsOf: pageRefs)
+        let currentBatchStartIndex = self.pokemonList.count - pageRefs.count
+        
+        // Fetch details for this batch
+        await fetchDetailsForList(refs: pageRefs, startIndex: currentBatchStartIndex)
+        
+        offset += limit
+        if offset >= sortedFlatRefs.count {
+            canLoadMore = false
+        }
+        
+        isLoading = false
+    }
+    
+    // General purpose fetcher for Flat Lists (Search or Sorted)
+    private func fetchDetailsForList(refs: [Pokemon], startIndex: Int = 0, isSearch: Bool = false) {
+        Task {
+            let detailedResults = await withTaskGroup(of: Pokemon.self) { group in
+                for pokemon in refs {
+                    group.addTask {
+                        var p = pokemon
+                        do {
+                            // Fetch Types
+                            if let types = try? await self.service.fetchPokemonDetails(id: p.id) {
+                                p.types = types
+                            }
+                            
+                            // Fetch Species for Color/ID (Only if ID reasonable)
+                            if p.id <= 10000 {
+                                if let species = try? await self.service.fetchPokemonSpecies(id: p.id) {
+                                    p.mainColor = species.color.name
+                                    p.speciesId = species.id
+                                }
+                            }
+                            return p
                         } catch {
-                            // If failed, return as is (will show Loading/Skeleton)
-                            return pokemon
+                            return p
                         }
                     }
                 }
                 
-                var detailedResults: [Pokemon] = []
+                var results: [Pokemon] = []
                 for await p in group {
-                    detailedResults.append(p)
+                    results.append(p)
                 }
-                
-                // Update Search Results with details
-                DispatchQueue.main.async {
-                    // Update the structs in the array
+                return results
+            }
+            
+            DispatchQueue.main.async {
+                if isSearch {
+                     // Update search results in place
                      self.searchResults = self.searchResults.map { original in
                          detailedResults.first(where: { $0.id == original.id }) ?? original
                      }
+                } else {
+                    // Update main list in place
+                    // We know the range we just added [startIndex ..< startIndex+count]
+                    for detail in detailedResults {
+                        if let idx = self.pokemonList.firstIndex(where: { $0.id == detail.id }) {
+                            self.pokemonList[idx] = detail
+                        }
+                    }
                 }
             }
         }
@@ -148,12 +272,10 @@ class PokemonListViewModel: ObservableObject {
         if let cachedPokemon = cacheService.load() {
             self.pokemonList = cachedPokemon
             self.offset = cachedPokemon.count
-            // If we have cached data, we might be at the end, or we can load more.
-            // Usually safest to assume we can load more if we have data.
-            // But if cached count is 0, offset is 0.
         }
     }
     
+    // Original "Species-based" paging (Grouped by default)
     func loadMoreInternal() async {
         guard !isLoading && canLoadMore else { return }
         
@@ -161,7 +283,7 @@ class PokemonListViewModel: ObservableObject {
         errorMessage = nil
         
         do {
-            // 1. Fetch Species List (instead of Pokemon list)
+            // 1. Fetch Species List
             let speciesList = try await service.fetchSpeciesList(limit: limit, offset: offset)
             
             if speciesList.isEmpty {
@@ -172,31 +294,21 @@ class PokemonListViewModel: ObservableObject {
                     for species in speciesList {
                         group.addTask {
                             do {
-                                // Fetch Species Details (Variation + Color)
                                 let speciesDetails = try await self.service.fetchPokemonSpecies(id: species.id)
-                                
-                                // Expand Varieties
                                 var variants: [Pokemon] = []
                                 
-                                // Iterate through all varieties
                                 for var variety in speciesDetails.varieties {
                                     var p = variety.pokemon
                                     p.speciesId = species.id
                                     p.mainColor = speciesDetails.color.name
                                     
-                                    // Fetch Types for this specific variant
-                                    // Note: This adds N calls per species, but concurrent
                                     if let types = try? await self.service.fetchPokemonDetails(id: p.id) {
                                         p.types = types
                                     }
-                                    
                                     variants.append(p)
                                 }
-                                
-                                // Sort variants
                                 return variants
                             } catch {
-                                print("Failed to fetch species details for \(species.name): \(error)")
                                 return []
                             }
                         }
@@ -207,11 +319,11 @@ class PokemonListViewModel: ObservableObject {
                         results.append(contentsOf: batch)
                     }
                     
-                    // Restore Species Order (Crucial for list consistency)
+                    // Re-sort by species ID to maintain list order
                     var orderedResults: [Pokemon] = []
                     for species in speciesList {
-                        let belongingToSpecies = results.filter { $0.speciesId == species.id }
-                        let sorted = belongingToSpecies.sorted { $0.id < $1.id }
+                        let belonging = results.filter { $0.speciesId == species.id }
+                        let sorted = belonging.sorted { $0.id < $1.id }
                         orderedResults.append(contentsOf: sorted)
                     }
                     
@@ -221,7 +333,7 @@ class PokemonListViewModel: ObservableObject {
                 pokemonList.append(contentsOf: newPokemon)
                 offset += limit
                 
-                // Save to Cache
+                // Only save cache in default mode
                 cacheService.save(pokemon: pokemonList)
             }
         } catch {
@@ -229,12 +341,6 @@ class PokemonListViewModel: ObservableObject {
         }
         
         isLoading = false
-    }
-    
-    func loadMore() {
-        Task {
-            await loadMoreInternal()
-        }
     }
     
     func hasReachedEnd(of pokemon: Pokemon) -> Bool {

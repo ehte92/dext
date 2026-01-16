@@ -26,6 +26,22 @@ struct PokedexView: View {
         .navigationBarTitleDisplayMode(.inline)
         .background(Color(UIColor.systemGroupedBackground))
         .searchable(text: $viewModel.searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search Pokemon")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    viewModel.isFilterPresented = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .foregroundStyle(viewModel.filterConfig.isDefault ? Color.primary : Color.blue)
+                }
+            }
+        }
+        .sheet(isPresented: $viewModel.isFilterPresented) {
+            FilterView(config: $viewModel.filterConfig, isPresented: $viewModel.isFilterPresented) {
+                viewModel.applyFilters()
+            }
+            .presentationDetents([.medium])
+        }
         .onAppear {
             if viewModel.pokemonList.isEmpty {
                 viewModel.loadMore()
