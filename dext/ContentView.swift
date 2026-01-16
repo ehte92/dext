@@ -21,7 +21,7 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
-                .padding(.vertical, 20)
+                .padding() // Restore default padding (horizontal + vertical) to fix edge stretching
             }
             .navigationTitle("Pokédex")
             .background(Color(UIColor.systemGroupedBackground))
